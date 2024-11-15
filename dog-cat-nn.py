@@ -8,22 +8,22 @@ if __name__ == "__main__":
     from torchvision import transforms, datasets
 
     ### Uncomment for Google Colab ###
-    # from google.colab import drive
-    # drive.mount('/content/drive', force_remount=True)
+    from google.colab import drive
+    drive.mount('/content/drive', force_remount=True)
 
-    # TRAIN_DATA_PATH = "/content/drive/MyDrive/dl-data/project1/data/train"
-    # TEST_DATA_PATH = "/content/drive/MyDrive/dl-data/project1/data/test"
-    # VALIDATION_DATA_PATH = "/content/drive/MyDrive/dl-data/project1/data/validation"
+    TRAIN_DATA_PATH = "/content/drive/MyDrive/dl-data/project1/data/train"
+    TEST_DATA_PATH = "/content/drive/MyDrive/dl-data/project1/data/test"
+    VALIDATION_DATA_PATH = "/content/drive/MyDrive/dl-data/project1/data/validation"
     ###
 
     ### Comment for Google Colab ###
-    TRAIN_DATA_PATH = "data/train"
-    TEST_DATA_PATH = "data/test"
-    VALIDATION_DATA_PATH = "data/validation"
+    # TRAIN_DATA_PATH = "data/train"
+    # TEST_DATA_PATH = "data/test"
+    # VALIDATION_DATA_PATH = "data/validation"
     ###
 
-    BATCH_SIZE=50
-    IMAGE_SIZE=(100,100)
+    BATCH_SIZE = 50
+    IMAGE_SIZE = (100, 100)
 
     ### Create the data loaders ###
     ###############################
@@ -70,9 +70,11 @@ if __name__ == "__main__":
     train_data = torch.utils.data.ConcatDataset(
         [train_dataset_flip, train_dataset_triv, train_dataset_org, train_dataset_random1, train_dataset_random2]
     )
-    train_data_loader = data.DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True,  num_workers=2)
+    train_data_loader = data.DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
     test_data = torchvision.datasets.ImageFolder(root=TEST_DATA_PATH, transform=test_transform)
-    test_data_loader  = data.DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
+    test_dataloader = data.DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
+    validation_data = torchvision.datasets.ImageFolder(root=VALIDATION_DATA_PATH, transform=test_transform)  # Apply the same transform
+    validation_dataloader = data.DataLoader(validation_data, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
 
 
     ### Constructing the network ###
@@ -118,8 +120,18 @@ if __name__ == "__main__":
 
     ### Train and test the network ###
     ##################################
+    
+    train_losses = []
+    test_losses = []
+    train_accuracies = []
+    test_accuracies = []
 
     def train_loop(dataloader, model, loss_fn, optimizer):
+        model.train()  # Set the model to training mode
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        
         size = len(dataloader.dataset)
         model.train()
         for batch, (X, y) in enumerate(dataloader):
@@ -130,27 +142,59 @@ if __name__ == "__main__":
             optimizer.step()
             optimizer.zero_grad()
 
+            running_loss += loss.item()
+            _, predicted = torch.max(pred.data, 1)
+            total += y.size(0)
+            correct += (predicted == y).sum().item()
             if batch % 50 == 0:
                 loss, current = loss.item(), batch * len(X)
                 print(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}]")
+                
+        train_losses.append(running_loss / len(dataloader))
+        train_accuracies.append(correct / total) 
 
 
     def test_loop(dataloader, model, loss_fn):
         model.eval()
+        
         size = len(dataloader.dataset)
         num_batches = len(dataloader)
         test_loss, correct = 0, 0
+        total = 0
 
         with torch.no_grad():
             for X, y in dataloader:
                 X, y = X.to(device), y.to(device)
                 pred = model(X)
                 test_loss += loss_fn(pred, y).item()
-                correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+                _, predicted = torch.max(pred.data, 1)
+                correct += (predicted == y).sum().item()
+                total += y.size(0)
+                
+        test_losses.append(test_loss / num_batches)  # Average test loss
+        test_accuracies.append(correct / total)
 
         test_loss /= num_batches
         correct /= size
         print(f"Test Error: \n Accuracy: {(100 * correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
+    
+    
+    def validate(dataloader, model, loss_fn):
+        model.eval()
+        size = len(dataloader.dataset)
+        num_batches = len(dataloader)
+        validation_loss, correct = 0, 0
+
+        with torch.no_grad():
+            for X, y in dataloader:
+                X, y = X.to(device), y.to(device)
+                pred = model(X)
+                validation_loss += loss_fn(pred, y).item()
+                correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+        
+        validation_loss /= num_batches
+        correct /= size
+        print(f"Validation Error: \n Accuracy: {(100 * correct):>0.1f}%, Avg loss: {validation_loss:>8f} \n")
 
 
     loss_fn = nn.CrossEntropyLoss()
@@ -159,5 +203,33 @@ if __name__ == "__main__":
     for t in range(epochs):
         print(f"Epoch {t + 1}\n-------------------------------")
         train_loop(train_data_loader, model, loss_fn, optimizer)
-        test_loop(test_data_loader, model, loss_fn)
+        test_loop(test_dataloader, model, loss_fn)
+    validate(validation_dataloader, model, loss_fn)
     print("Done!")
+    
+    ### Print
+    
+    import matplotlib.pyplot as plt
+
+    epochs_range = range(1, epochs + 1)
+    plt.figure(figsize=(14, 5))
+
+    # Plot loss
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs_range, train_losses, label="Train Loss")
+    plt.plot(epochs_range, test_losses, label="Test Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend(loc="upper right")
+    plt.title("Training and Test Loss")
+
+    # Plot accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs_range, train_accuracies, label="Train Accuracy")
+    plt.plot(epochs_range, test_accuracies, label="Test Accuracy")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend(loc="upper right")
+    plt.title("Training and Test Accuracy")
+
+    plt.show()
