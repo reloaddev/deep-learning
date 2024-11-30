@@ -441,7 +441,7 @@ def preprocess_text(text):
     return text.strip()
 
 
-def tokenize_text(text, vocabulary, max_length=50, pad_value=1):
+def tokenize_text(text, vocabulary, max_length=25, pad_value=1):
     tokens = text.split()
     token_indices = [vocabulary.get(token, 0) for token in tokens]
     if len(token_indices) > max_length:
